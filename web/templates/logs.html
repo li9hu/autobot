@@ -1,0 +1,270 @@
+{{ define "logs.html" }}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ .title }} - AutoBot</title>
+    
+    <!-- TailwindCSS -->
+    <script src="/static/js/tailwind.js"></script>
+    <!-- Lucide Icons -->
+    <script src="/static/js/lucide.js"></script>
+    <!-- Inter Font -->
+    <link href="/static/css/inter-font.css" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .log-card { transition: all 0.2s ease-in-out; }
+        .log-card:hover { transform: translateY(-1px); }
+        
+        /* 自定义滚动条样式 */
+        .log-output-scrollable {
+            scrollbar-width: thin;
+            scrollbar-color: rgba(156, 163, 175, 0.5) transparent;
+        }
+        
+        .log-output-scrollable::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        
+        .log-output-scrollable::-webkit-scrollbar-track {
+            background: transparent;
+            border-radius: 4px;
+        }
+        
+        .log-output-scrollable::-webkit-scrollbar-thumb {
+            background-color: rgba(156, 163, 175, 0.5);
+            border-radius: 4px;
+            border: 2px solid transparent;
+            background-clip: content-box;
+        }
+        
+        .log-output-scrollable::-webkit-scrollbar-thumb:hover {
+            background-color: rgba(156, 163, 175, 0.7);
+        }
+        
+        /* 暗色主题的滚动条 */
+        .log-output-dark::-webkit-scrollbar-thumb {
+            background-color: rgba(156, 163, 175, 0.3);
+        }
+        
+        .log-output-dark::-webkit-scrollbar-thumb:hover {
+            background-color: rgba(156, 163, 175, 0.5);
+        }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+    <!-- Navigation -->
+    <nav class="bg-white border-b border-slate-200 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex items-center space-x-3">
+                    <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+                        <i data-lucide="bot" class="w-5 h-5 text-white"></i>
+                    </div>
+                    <h1 class="text-xl font-semibold text-slate-900">AutoBot</h1>
+                </div>
+                <div class="hidden sm:flex items-center space-x-8">
+                    <a href="/" class="text-slate-600 hover:text-slate-900 font-medium pb-4 px-1 border-b-2 border-transparent hover:border-slate-300 transition-colors">任务管理</a>
+                    <a href="/logs" class="text-blue-600 font-medium border-b-2 border-blue-600 pb-4 px-1">执行日志</a>
+                    <a href="/bark" class="text-slate-600 hover:text-slate-900 font-medium pb-4 px-1 border-b-2 border-transparent hover:border-slate-300 transition-colors">Bark管理</a>
+                    
+                    <!-- User Menu -->
+                    <div class="relative ml-4">
+                        <button id="user-menu-button" class="flex items-center space-x-2 text-slate-600 hover:text-slate-900 focus:outline-none">
+                            <div class="w-8 h-8 bg-slate-200 rounded-full flex items-center justify-center">
+                                <i data-lucide="user" class="w-4 h-4 text-slate-600"></i>
+                            </div>
+                            <span id="username-display" class="text-sm font-medium">用户</span>
+                            <i data-lucide="chevron-down" class="w-4 h-4"></i>
+                        </button>
+                        
+                        <!-- Dropdown Menu -->
+                        <div id="user-dropdown" class="hidden absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg border border-slate-200 z-50">
+                            <div class="py-1">
+                                <button id="logout-btn" class="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center">
+                                    <i data-lucide="log-out" class="w-4 h-4 mr-2"></i>
+                                    退出登录
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Mobile menu button -->
+                <div class="sm:hidden">
+                    <button id="mobile-menu-button" class="p-2 rounded-md text-slate-400 hover:text-slate-500 hover:bg-slate-100">
+                        <i data-lucide="menu" class="w-6 h-6"></i>
+                    </button>
+                </div>
+            </div>
+            <!-- Mobile menu -->
+            <div id="mobile-menu" class="sm:hidden hidden border-t border-slate-200 py-3">
+                <a href="/" class="block px-3 py-2 text-slate-600 hover:text-slate-900">任务管理</a>
+                <a href="/logs" class="block px-3 py-2 text-blue-600 font-medium">执行日志</a>
+                <a href="/bark" class="block px-3 py-2 text-slate-600 hover:text-slate-900">Bark管理</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- Header -->
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+            <div>
+                <h2 class="text-2xl font-bold text-slate-900">执行日志</h2>
+                <p class="text-slate-600 mt-1">查看任务执行历史和结果</p>
+            </div>
+        </div>
+
+        <!-- Filters Card -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div class="space-y-2">
+                    <label for="taskFilter" class="block text-sm font-medium text-slate-700">任务筛选</label>
+                    <select id="taskFilter" class="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white text-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors">
+                        <option value="">所有任务</option>
+                        <!-- 动态加载任务选项 -->
+                    </select>
+                </div>
+                <div class="space-y-2">
+                    <label for="statusFilter" class="block text-sm font-medium text-slate-700">状态筛选</label>
+                    <select id="statusFilter" class="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white text-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors">
+                        <option value="">所有状态</option>
+                        <option value="success">成功</option>
+                        <option value="execution_failed">执行失败</option>
+                        <option value="script_failed">脚本错误</option>
+                        <option value="failed">失败</option>
+                        <option value="running">运行中</option>
+                    </select>
+                </div>
+                <div class="space-y-2">
+                    <label for="dateFilter" class="block text-sm font-medium text-slate-700">日期筛选</label>
+                    <input type="date" id="dateFilter" class="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white text-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors">
+                </div>
+                <div class="space-y-2">
+                    <label class="block text-sm font-medium text-slate-700">&nbsp;</label>
+                    <div class="flex gap-2">
+                        <button id="searchBtn" class="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 outline-none transition-colors">
+                            <i data-lucide="search" class="w-4 h-4"></i>
+                            搜索
+                        </button>
+                        <button id="refreshBtn" class="inline-flex items-center gap-2 px-4 py-2 border border-slate-300 rounded-xl bg-white text-slate-700 hover:bg-slate-50 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors">
+                            <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Quick Actions -->
+            <div class="flex flex-wrap gap-2 mt-4 pt-4 border-t border-slate-200">
+                <button id="deleteAllLogsBtn" class="inline-flex items-center gap-2 px-3 py-1.5 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition-colors text-sm font-medium">
+                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                    删除所有日志
+                </button>
+                <button id="deleteAllBarkLogsBtn" class="inline-flex items-center gap-2 px-3 py-1.5 bg-orange-50 text-orange-700 rounded-lg hover:bg-orange-100 transition-colors text-sm font-medium">
+                    <i data-lucide="bell-off" class="w-4 h-4"></i>
+                    删除所有Bark日志
+                </button>
+                <button id="logStatsBtn" class="inline-flex items-center gap-2 px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 transition-colors text-sm font-medium">
+                    <i data-lucide="bar-chart" class="w-4 h-4"></i>
+                    统计信息
+                </button>
+                <button id="exportBtn" class="inline-flex items-center gap-2 px-3 py-1.5 bg-green-50 text-green-700 rounded-lg hover:bg-green-100 transition-colors text-sm font-medium">
+                    <i data-lucide="download" class="w-4 h-4"></i>
+                    导出日志
+                </button>
+            </div>
+        </div>
+
+        <!-- Logs Container -->
+        <div id="logsContainer" class="space-y-4">
+            <!-- Loading state -->
+            <div class="flex items-center justify-center py-12">
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <span class="ml-3 text-slate-600">正在加载执行日志...</span>
+            </div>
+        </div>
+
+        <!-- Pagination -->
+        <nav id="pagination" class="hidden mt-8">
+            <div class="flex justify-center">
+                <div id="paginationList" class="flex items-center space-x-1">
+                    <!-- 分页内容将在这里动态生成 -->
+                </div>
+            </div>
+        </nav>
+    </div>
+
+    <!-- Log Detail Modal -->
+    <div id="logDetailModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onclick="closeLogDetailModal()">
+        <div class="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden" onclick="event.stopPropagation()">
+            <div class="flex items-center justify-between p-6 border-b border-slate-200">
+                <h3 class="text-lg font-semibold text-slate-900">执行日志详情</h3>
+                <button onclick="closeLogDetailModal()" class="text-slate-400 hover:text-slate-600">
+                    <i data-lucide="x" class="w-6 h-6"></i>
+                </button>
+            </div>
+            <div id="logDetailContent" class="p-6 overflow-y-auto max-h-[calc(90vh-140px)]">
+                <!-- Log detail content -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats Modal -->
+    <div id="statsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onclick="closeStatsModal()">
+        <div class="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[85vh] overflow-hidden" onclick="event.stopPropagation()">
+            <div class="flex items-center justify-between p-4 border-b border-slate-200 bg-slate-50">
+                <h3 class="text-lg font-semibold text-slate-900">存储统计信息</h3>
+                <button onclick="closeStatsModal()" class="text-slate-400 hover:text-slate-600">
+                    <i data-lucide="x" class="w-6 h-6"></i>
+                </button>
+            </div>
+            <div id="statsContent" class="p-4 overflow-y-auto max-h-[calc(85vh-80px)]">
+                <!-- Stats content -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div id="confirmModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+            <div class="flex items-center mb-4">
+                <div class="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center mr-3">
+                    <i data-lucide="alert-triangle" class="w-5 h-5 text-amber-600"></i>
+                </div>
+                <h3 id="modalTitle" class="text-lg font-semibold text-slate-900">确认操作</h3>
+            </div>
+            <div id="modalBody" class="text-slate-600 mb-6">
+                <!-- Modal content -->
+            </div>
+            <div class="flex justify-end space-x-3">
+                <button id="modalCancel" class="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 transition-colors">
+                    取消
+                </button>
+                <button id="modalConfirm" class="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors">
+                    确认
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- jQuery -->
+    <script src="/static/js/jquery.min.js"></script>
+    <!-- Custom JS -->
+    <script src="/static/js/app.js"></script>
+    <script src="/static/js/auth.js"></script>
+    <script src="/static/js/logs.js"></script>
+    <script>
+        // Initialize Lucide icons
+        lucide.createIcons();
+        
+        // Mobile menu toggle
+        document.getElementById('mobile-menu-button').addEventListener('click', function() {
+            const menu = document.getElementById('mobile-menu');
+            menu.classList.toggle('hidden');
+        });
+    </script>
+</body>
+</html>
+{{ end }}

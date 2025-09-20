@@ -1,0 +1,353 @@
+{{ define "login.html" }}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>{{ .title }} - AutoBot</title>
+    
+    <!-- TailwindCSS -->
+    <script src="/static/js/tailwind.js"></script>
+    <!-- Lucide Icons -->
+    <script src="/static/js/lucide.js"></script>
+    <!-- Inter Font -->
+    <link href="/static/css/inter-font.css" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .login-card { 
+            backdrop-filter: blur(10px);
+            background: rgba(31, 41, 55, 0.8);
+        }
+        .input-focus:focus {
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        .btn-hover:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+        }
+        .btn-hover {
+            transition: all 0.2s ease-in-out;
+        }
+        .fade-in {
+            animation: fadeIn 0.6s ease-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 min-h-screen flex items-center justify-center p-4">
+    <!-- Background Pattern -->
+    <div class="absolute inset-0 bg-[url('data:image/svg+xml,%3Csvg width=%2260%22 height=%2260%22 viewBox=%220 0 60 60%22 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cg fill=%22none%22 fill-rule=%22evenodd%22%3E%3Cg fill=%22%239C92AC%22 fill-opacity=%220.05%22%3E%3Ccircle cx=%2230%22 cy=%2230%22 r=%222%22/%3E%3C/g%3E%3C/g%3E%3C/svg%3E')] opacity-50"></div>
+    
+    <!-- Login Card -->
+    <div class="login-card max-w-md w-full mx-auto p-8 rounded-2xl shadow-2xl border border-gray-700 fade-in relative z-10">
+        <!-- Logo and Title -->
+        <div class="text-center mb-8">
+            <div class="w-16 h-16 bg-gradient-to-r from-blue-600 to-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
+                <i data-lucide="bot" class="w-8 h-8 text-white"></i>
+            </div>
+            <h1 class="text-3xl font-bold text-white mb-2">AutoBot</h1>
+            <p class="text-gray-400">自动化任务管理平台</p>
+        </div>
+
+        <!-- Error Message -->
+        <div id="error-message" class="hidden mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
+            <div class="flex items-center">
+                <i data-lucide="alert-circle" class="w-5 h-5 text-red-400 mr-2"></i>
+                <span id="error-text" class="text-red-400 text-sm"></span>
+            </div>
+        </div>
+
+        <!-- Success Message -->
+        <div id="success-message" class="hidden mb-6 p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
+            <div class="flex items-center">
+                <i data-lucide="check-circle" class="w-5 h-5 text-green-400 mr-2"></i>
+                <span id="success-text" class="text-green-400 text-sm"></span>
+            </div>
+        </div>
+
+        <!-- Login Form -->
+        <form id="login-form" class="space-y-6">
+            <div>
+                <label for="username" class="block text-sm font-medium text-gray-300 mb-2">用户名</label>
+                <div class="relative">
+                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <i data-lucide="user" class="w-5 h-5 text-gray-500"></i>
+                    </div>
+                    <input type="text" id="username" name="username" required
+                           class="w-full pl-10 pr-4 py-3 rounded-lg bg-gray-900 border border-gray-700 text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent input-focus"
+                           placeholder="请输入用户名">
+                </div>
+            </div>
+
+            <div>
+                <label for="password" class="block text-sm font-medium text-gray-300 mb-2">密码</label>
+                <div class="relative">
+                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <i data-lucide="lock" class="w-5 h-5 text-gray-500"></i>
+                    </div>
+                    <input type="password" id="password" name="password" required
+                           class="w-full pl-10 pr-12 py-3 rounded-lg bg-gray-900 border border-gray-700 text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent input-focus"
+                           placeholder="请输入密码">
+                    <button type="button" id="toggle-password" class="absolute inset-y-0 right-0 pr-3 flex items-center">
+                        <i data-lucide="eye" class="w-5 h-5 text-gray-500 hover:text-gray-300"></i>
+                    </button>
+                </div>
+            </div>
+
+            <button type="submit" id="login-btn"
+                    class="w-full py-3 px-4 rounded-lg bg-gradient-to-r from-blue-600 to-blue-700 text-white font-medium hover:from-blue-500 hover:to-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800 btn-hover disabled:opacity-50 disabled:cursor-not-allowed">
+                <span class="flex items-center justify-center">
+                    <span id="login-text">登录</span>
+                    <div id="login-spinner" class="hidden ml-2">
+                        <div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    </div>
+                </span>
+            </button>
+        </form>
+
+        <!-- Register Button (only shown if registration is available) -->
+        <div id="register-section" class="hidden mt-6">
+            <div class="relative">
+                <div class="absolute inset-0 flex items-center">
+                    <div class="w-full border-t border-gray-700"></div>
+                </div>
+                <div class="relative flex justify-center text-sm">
+                    <span class="px-2 bg-gray-800 text-gray-400">或</span>
+                </div>
+            </div>
+            
+            <button type="button" id="register-btn"
+                    class="w-full mt-4 py-3 px-4 rounded-lg bg-gradient-to-r from-green-600 to-green-700 text-white font-medium hover:from-green-500 hover:to-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 focus:ring-offset-gray-800 btn-hover disabled:opacity-50 disabled:cursor-not-allowed">
+                <span class="flex items-center justify-center">
+                    <i data-lucide="user-plus" class="w-5 h-5 mr-2"></i>
+                    <span id="register-text">注册新用户</span>
+                    <div id="register-spinner" class="hidden ml-2">
+                        <div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    </div>
+                </span>
+            </button>
+            
+            <p class="mt-3 text-xs text-gray-500 text-center">
+                <i data-lucide="info" class="w-4 h-4 inline mr-1"></i>
+                首次部署可直接注册管理员账户
+            </p>
+        </div>
+
+        <!-- Footer -->
+        <div class="mt-8 text-center">
+            <p class="text-xs text-gray-500">
+                © 2024 AutoBot. 自动化让工作更简单.
+            </p>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Lucide icons
+        lucide.createIcons();
+
+        // DOM elements
+        const loginForm = document.getElementById('login-form');
+        const registerBtn = document.getElementById('register-btn');
+        const registerSection = document.getElementById('register-section');
+        const errorMessage = document.getElementById('error-message');
+        const successMessage = document.getElementById('success-message');
+        const errorText = document.getElementById('error-text');
+        const successText = document.getElementById('success-text');
+        const togglePassword = document.getElementById('toggle-password');
+        const passwordInput = document.getElementById('password');
+
+        // Check if registration is available
+        async function checkRegistrationAvailable() {
+            try {
+                const response = await fetch('/api/auth/check-registration');
+                const data = await response.json();
+                
+                if (data.registration_available) {
+                    registerSection.classList.remove('hidden');
+                }
+            } catch (error) {
+                console.error('Failed to check registration availability:', error);
+            }
+        }
+
+        // Show error message
+        function showError(message) {
+            errorText.textContent = message;
+            errorMessage.classList.remove('hidden');
+            successMessage.classList.add('hidden');
+        }
+
+        // Show success message
+        function showSuccess(message) {
+            successText.textContent = message;
+            successMessage.classList.remove('hidden');
+            errorMessage.classList.add('hidden');
+        }
+
+        // Hide messages
+        function hideMessages() {
+            errorMessage.classList.add('hidden');
+            successMessage.classList.add('hidden');
+        }
+
+        // Toggle password visibility
+        togglePassword.addEventListener('click', function() {
+            const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
+            passwordInput.setAttribute('type', type);
+            
+            const icon = this.querySelector('i');
+            if (type === 'password') {
+                icon.setAttribute('data-lucide', 'eye');
+            } else {
+                icon.setAttribute('data-lucide', 'eye-off');
+            }
+            lucide.createIcons();
+        });
+
+        // Login form submission
+        loginForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            hideMessages();
+
+            const loginBtn = document.getElementById('login-btn');
+            const loginText = document.getElementById('login-text');
+            const loginSpinner = document.getElementById('login-spinner');
+
+            // Show loading state
+            loginBtn.disabled = true;
+            loginText.textContent = '登录中...';
+            loginSpinner.classList.remove('hidden');
+
+            const formData = new FormData(loginForm);
+            const data = {
+                username: formData.get('username'),
+                password: formData.get('password')
+            };
+
+            try {
+                const response = await fetch('/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showSuccess('登录成功，正在跳转...');
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 1000);
+                } else {
+                    showError(result.error || '登录失败');
+                }
+            } catch (error) {
+                showError('网络错误，请稍后重试');
+            } finally {
+                // Reset loading state
+                loginBtn.disabled = false;
+                loginText.textContent = '登录';
+                loginSpinner.classList.add('hidden');
+            }
+        });
+
+        // Register button click
+        registerBtn.addEventListener('click', async function() {
+            hideMessages();
+
+            const registerText = document.getElementById('register-text');
+            const registerSpinner = document.getElementById('register-spinner');
+
+            // Show loading state
+            registerBtn.disabled = true;
+            registerText.textContent = '注册中...';
+            registerSpinner.classList.remove('hidden');
+
+            const formData = new FormData(loginForm);
+            const data = {
+                username: formData.get('username'),
+                password: formData.get('password')
+            };
+
+            // Validate form data
+            if (!data.username || !data.password) {
+                showError('请填写用户名和密码');
+                registerBtn.disabled = false;
+                registerText.textContent = '注册新用户';
+                registerSpinner.classList.add('hidden');
+                return;
+            }
+
+            if (data.password.length < 6) {
+                showError('密码长度至少6位');
+                registerBtn.disabled = false;
+                registerText.textContent = '注册新用户';
+                registerSpinner.classList.add('hidden');
+                return;
+            }
+
+            try {
+                const response = await fetch('/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showSuccess('注册成功，正在跳转...');
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 1000);
+                } else {
+                    showError(result.error || '注册失败');
+                }
+            } catch (error) {
+                showError('网络错误，请稍后重试');
+            } finally {
+                // Reset loading state
+                registerBtn.disabled = false;
+                registerText.textContent = '注册新用户';
+                registerSpinner.classList.add('hidden');
+            }
+        });
+
+        // Initialize
+        checkRegistrationAvailable();
+
+        // Auto-focus username input
+        document.getElementById('username').focus();
+
+        // 忽略浏览器扩展程序的错误
+        window.addEventListener('error', function(event) {
+            // 忽略来自chrome-extension的错误
+            if (event.filename && event.filename.includes('chrome-extension://')) {
+                event.preventDefault();
+                return false;
+            }
+        });
+
+        // 忽略未处理的Promise拒绝（通常来自扩展程序）
+        window.addEventListener('unhandledrejection', function(event) {
+            // 忽略来自扩展程序的Promise拒绝
+            if (event.reason && event.reason.message && 
+                (event.reason.message.includes('chrome-extension') || 
+                 event.reason.message.includes('Extension'))) {
+                event.preventDefault();
+                return false;
+            }
+        });
+    </script>
+</body>
+</html>
+{{ end }}
