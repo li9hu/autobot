@@ -33,6 +33,8 @@ go build -o autobot main.go
 
 # 运行
 ./autobot
+
+或者直接运行 ./start.sh
 ```
 
 ### 3. 访问应用
@@ -67,24 +69,6 @@ def main():
     }
     print(json.dumps(notification, ensure_ascii=False))
 ```
-
-### Bark 通知配置
-
-1. 在 iOS 设备上安装 [Bark](https://apps.apple.com/cn/app/bark-customed-notifications/id1403753865) 应用
-2. 获取设备密钥
-3. 在任务详情页面配置 Bark 通知参数
-
-配置示例：
-```json
-{
-  "device_key": "your_device_key_here",
-  "title": "$title",
-  "body": "$body",
-  "group": "$group",
-  "sound": "bell.caf"
-}
-```
-
 ## 项目结构
 
 ```
@@ -105,30 +89,9 @@ autoBot/
     ├── static/            # 静态文件
     └── templates/         # HTML 模板
 ```
+<img width="1396" height="576" alt="image" src="https://github.com/user-attachments/assets/ec3de239-bcb7-428a-bb35-a7a2a202a363" />
+<img width="1573" height="1166" alt="image" src="https://github.com/user-attachments/assets/828571ba-3f44-4177-9da2-7ec5c7eca521" />
 
-## 示例脚本
 
-`examples/` 目录包含了多个示例脚本：
-
-- `simple_task_example.py` - 简单任务示例
-- `system_monitor_example.py` - 系统监控示例
-- `web_health_check_example.py` - 网站健康检查
-- `bark_notification_example.py` - Bark 通知示例
-- 更多高级示例...
-
-## 部署说明
-
-详细的部署说明请参考 `DEPLOYMENT.md` 文件。
-
-## 技术栈
-
-- **后端**: Go + Gin + GORM + SQLite
-- **前端**: HTML + Tailwind CSS + Alpine.js + JavaScript
-- **任务执行**: Python 3
-- **通知**: Bark iOS App
-
-## 许可证
-
-MIT License
 
 
