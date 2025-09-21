@@ -73,7 +73,14 @@ func (n *Notifier) SendBark(config map[string]string) error {
 		return fmt.Errorf("failed to marshal Bark payload: %v", err)
 	}
 
-	// 创建 HTTP 请求
+	// 创建 HTTP 请求 - 添加 /push 路由
+	// 检查 barkURL 是否以 / 结尾，并添加 /push 路由
+	if strings.HasSuffix(barkURL, "/") {
+		barkURL = barkURL + "push"
+	} else {
+		barkURL = barkURL + "/push"
+	}
+
 	req, err := http.NewRequest("POST", barkURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("failed to create Bark request: %v", err)
