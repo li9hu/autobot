@@ -3,6 +3,7 @@ version: "3.9"
 services:
   autobot:
     build: .
+    image: autobot:arm64
     environment:
       - TZ=Asia/Shanghai
     container_name: autobot
