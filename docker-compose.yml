@@ -1,0 +1,13 @@
+version: "3.9"
+
+services:
+  autobot:
+    build: .
+    environment:
+      - TZ=Asia/Shanghai
+    container_name: autobot
+    volumes:
+      - ./autobot.db:/opt/autobot.db
+    ports:
+      - "50001:8080"
+    restart: unless-stopped
