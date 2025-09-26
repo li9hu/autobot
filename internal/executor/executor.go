@@ -38,9 +38,23 @@ func ExecuteTask(task *models.Task) {
 		Status:    "running",
 	}
 
-	// 保存日志记录到数据库
-	if err := database.GetDB().Create(&taskLog).Error; err != nil {
+	// 保存日志记录到数据库 - 使用事务确保数据一致性
+	db := database.GetDB()
+	tx := db.Begin()
+	if tx.Error != nil {
+		log.Printf("Failed to start transaction for task log: %v", tx.Error)
+		return
+	}
+	defer tx.Rollback() // 如果没有提交，自动回滚
+
+	if err := tx.Create(&taskLog).Error; err != nil {
 		log.Printf("Failed to create task log: %v", err)
+		return
+	}
+
+	// 提交初始日志记录
+	if err := tx.Commit().Error; err != nil {
+		log.Printf("Failed to commit initial task log: %v", err)
 		return
 	}
 
@@ -81,9 +95,24 @@ func ExecuteTask(task *models.Task) {
 		log.Printf("Task execution completed: %s (ID: %d), Duration: %dms", task.Name, task.ID, duration)
 	}
 
-	// 保存更新后的日志
-	if err := database.GetDB().Save(&taskLog).Error; err != nil {
+	// 保存更新后的日志 - 使用事务确保数据一致性
+	db = database.GetDB()
+	tx = db.Begin()
+	if tx.Error != nil {
+		log.Printf("Failed to start transaction for task log update: %v", tx.Error)
+		return
+	}
+	defer tx.Rollback() // 如果没有提交，自动回滚
+
+	if err := tx.Save(&taskLog).Error; err != nil {
 		log.Printf("Failed to update task log: %v", err)
+		return
+	}
+
+	// 提交更新后的日志记录
+	if err := tx.Commit().Error; err != nil {
+		log.Printf("Failed to commit updated task log: %v", err)
+		return
 	}
 
 	// 发送 Bark 通知（如果配置了）
