@@ -6,15 +6,19 @@ import (
 	"autobot/internal/models"
 	"autobot/internal/timeutils"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/robfig/cron/v3"
+	"gorm.io/gorm"
 )
 
 // Scheduler 任务调度器
 type Scheduler struct {
-	cron    *cron.Cron
-	entries map[uint]cron.EntryID // 任务ID -> cron 条目ID 的映射
+	cron         *cron.Cron
+	entries      map[uint]cron.EntryID // 任务ID -> cron 条目ID 的映射
+	mutex        sync.RWMutex          // 保护 entries 映射的读写锁
+	cleanupMutex sync.Mutex            // 防止 cleanupDeletedTasks 并发执行
 }
 
 // NewScheduler 创建新的调度器
@@ -53,7 +57,10 @@ func (s *Scheduler) Stop() {
 func (s *Scheduler) loadActiveTasks() {
 	var tasks []models.Task
 	// 只加载状态为active且未被软删除的任务
-	if err := database.GetDB().Where("status = ?", "active").Find(&tasks).Error; err != nil {
+	err := database.WithRetry(func(db *gorm.DB) error {
+		return db.Where("status = ?", "active").Find(&tasks).Error
+	})
+	if err != nil {
 		log.Printf("Failed to load active tasks: %v", err)
 		return
 	}
@@ -70,10 +77,12 @@ func (s *Scheduler) loadActiveTasks() {
 // AddTask 添加任务到调度器
 func (s *Scheduler) AddTask(task *models.Task) error {
 	// 如果任务已经在调度器中，先移除
+	s.mutex.Lock()
 	if entryID, exists := s.entries[task.ID]; exists {
 		s.cron.Remove(entryID)
 		delete(s.entries, task.ID)
 	}
+	s.mutex.Unlock()
 
 	// 只调度活跃的任务
 	if task.Status != "active" {
@@ -89,11 +98,17 @@ func (s *Scheduler) AddTask(task *models.Task) error {
 
 		// 获取最新的任务配置（包括时间排除配置）
 		var latestTask models.Task
-		if err := database.GetDB().First(&latestTask, task.ID).Error; err != nil {
+		err := database.WithRetry(func(db *gorm.DB) error {
+			return db.First(&latestTask, task.ID).Error
+		})
+		if err != nil {
 			log.Printf("Failed to get latest task config for task %d: %v", task.ID, err)
 			// 如果任务不存在（可能已被删除），从调度器中移除该任务
-			s.RemoveTask(task.ID)
-			log.Printf("Removed deleted task %d from scheduler", task.ID)
+			// 使用 goroutine 避免在回调中直接操作映射导致死锁
+			go func(taskID uint) {
+				s.RemoveTask(taskID)
+				log.Printf("Removed deleted task %d from scheduler", taskID)
+			}(task.ID)
 			return
 		}
 
@@ -110,7 +125,9 @@ func (s *Scheduler) AddTask(task *models.Task) error {
 				parser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 				if schedule, parseErr := parser.Parse(latestTask.CronExpr); parseErr == nil {
 					nextAllowedTime := timeutils.GetNextAllowedTime(schedule, timeExclusionConfig, now)
-					database.GetDB().Model(&models.Task{}).Where("id = ?", task.ID).Update("next_run", nextAllowedTime)
+					database.WithRetry(func(db *gorm.DB) error {
+						return db.Model(&models.Task{}).Where("id = ?", task.ID).Update("next_run", nextAllowedTime).Error
+					})
 				}
 				return
 			}
@@ -133,9 +150,11 @@ func (s *Scheduler) AddTask(task *models.Task) error {
 		}
 
 		// 更新执行时间
-		database.GetDB().Model(&models.Task{}).Where("id = ?", task.ID).Updates(map[string]interface{}{
-			"last_run": now,
-			"next_run": nextRun,
+		database.WithRetry(func(db *gorm.DB) error {
+			return db.Model(&models.Task{}).Where("id = ?", task.ID).Updates(map[string]interface{}{
+				"last_run": now,
+				"next_run": nextRun,
+			}).Error
 		})
 
 		// 执行任务
@@ -147,7 +166,9 @@ func (s *Scheduler) AddTask(task *models.Task) error {
 	}
 
 	// 保存 entryID
+	s.mutex.Lock()
 	s.entries[task.ID] = entryID
+	s.mutex.Unlock()
 
 	// 计算下次执行时间（考虑时间排除）
 	parser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
@@ -164,9 +185,9 @@ func (s *Scheduler) AddTask(task *models.Task) error {
 		}
 
 		// 只更新next_run字段，避免覆盖其他配置
-		if updateErr := database.GetDB().Model(&models.Task{}).Where("id = ?", task.ID).Update("next_run", nextRun).Error; updateErr != nil {
-			log.Printf("Failed to update next_run for task %d: %v", task.ID, updateErr)
-		}
+		database.WithRetry(func(db *gorm.DB) error {
+			return db.Model(&models.Task{}).Where("id = ?", task.ID).Update("next_run", nextRun).Error
+		})
 	} else {
 		log.Printf("Failed to parse cron expression '%s' for task %d: %v", task.CronExpr, task.ID, err)
 	}
@@ -177,6 +198,8 @@ func (s *Scheduler) AddTask(task *models.Task) error {
 
 // RemoveTask 从调度器中移除任务
 func (s *Scheduler) RemoveTask(taskID uint) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
 	if entryID, exists := s.entries[taskID]; exists {
 		s.cron.Remove(entryID)
 		delete(s.entries, taskID)
@@ -195,6 +218,8 @@ func (s *Scheduler) UpdateTask(task *models.Task) error {
 
 // GetScheduledTasks 获取当前调度的任务数量
 func (s *Scheduler) GetScheduledTasks() int {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
 	return len(s.entries)
 }
 
@@ -205,11 +230,17 @@ func (s *Scheduler) ListEntries() []cron.Entry {
 
 // cleanupDeletedTasks 清理已删除的任务
 func (s *Scheduler) cleanupDeletedTasks() {
-	// 获取当前调度器中的所有任务ID
+	// 防止并发执行清理操作
+	s.cleanupMutex.Lock()
+	defer s.cleanupMutex.Unlock()
+
+	// 获取当前调度器中的所有任务ID - 使用读锁保护
+	s.mutex.RLock()
 	var scheduledTaskIDs []uint
 	for taskID := range s.entries {
 		scheduledTaskIDs = append(scheduledTaskIDs, taskID)
 	}
+	s.mutex.RUnlock()
 
 	if len(scheduledTaskIDs) == 0 {
 		return
@@ -217,8 +248,11 @@ func (s *Scheduler) cleanupDeletedTasks() {
 
 	// 查询数据库中仍然存在且活跃的任务
 	var activeTasks []models.Task
-	if err := database.GetDB().Where("id IN ? AND status = ?", scheduledTaskIDs, "active").Find(&activeTasks).Error; err != nil {
-		log.Printf("Failed to query active tasks during cleanup: %v", err)
+	err := database.WithRetry(func(db *gorm.DB) error {
+		return db.Where("id IN ? AND status = ?", scheduledTaskIDs, "active").Find(&activeTasks).Error
+	})
+	if err != nil {
+		log.Printf("Failed to query active tasks during cleanup after retries: %v", err)
 		return
 	}
 
@@ -232,7 +266,7 @@ func (s *Scheduler) cleanupDeletedTasks() {
 	var removedCount int
 	for _, taskID := range scheduledTaskIDs {
 		if !activeTaskMap[taskID] {
-			s.RemoveTask(taskID)
+			s.RemoveTask(taskID) // RemoveTask 内部已经有锁保护
 			removedCount++
 			log.Printf("Cleaned up deleted/inactive task %d from scheduler", taskID)
 		}
