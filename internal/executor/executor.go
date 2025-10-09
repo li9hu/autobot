@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // LogCleanupCallback 日志清理回调函数类型
@@ -38,23 +40,24 @@ func ExecuteTask(task *models.Task) {
 		Status:    "running",
 	}
 
-	// 保存日志记录到数据库 - 使用事务确保数据一致性
-	db := database.GetDB()
-	tx := db.Begin()
-	if tx.Error != nil {
-		log.Printf("Failed to start transaction for task log: %v", tx.Error)
-		return
-	}
-	defer tx.Rollback() // 如果没有提交，自动回滚
+	// 保存日志记录到数据库 - 使用事务和重试机制确保数据一致性
+	err := database.WithRetry(func(db *gorm.DB) error {
+		tx := db.Begin()
+		if tx.Error != nil {
+			return tx.Error
+		}
+		defer tx.Rollback() // 如果没有提交，自动回滚
 
-	if err := tx.Create(&taskLog).Error; err != nil {
-		log.Printf("Failed to create task log: %v", err)
-		return
-	}
+		if err := tx.Create(&taskLog).Error; err != nil {
+			return err
+		}
 
-	// 提交初始日志记录
-	if err := tx.Commit().Error; err != nil {
-		log.Printf("Failed to commit initial task log: %v", err)
+		// 提交初始日志记录
+		return tx.Commit().Error
+	})
+
+	if err != nil {
+		log.Printf("Failed to create task log after retries: %v", err)
 		return
 	}
 
@@ -95,23 +98,24 @@ func ExecuteTask(task *models.Task) {
 		log.Printf("Task execution completed: %s (ID: %d), Duration: %dms", task.Name, task.ID, duration)
 	}
 
-	// 保存更新后的日志 - 使用事务确保数据一致性
-	db = database.GetDB()
-	tx = db.Begin()
-	if tx.Error != nil {
-		log.Printf("Failed to start transaction for task log update: %v", tx.Error)
-		return
-	}
-	defer tx.Rollback() // 如果没有提交，自动回滚
+	// 保存更新后的日志 - 使用事务和重试机制确保数据一致性
+	err = database.WithRetry(func(db *gorm.DB) error {
+		tx := db.Begin()
+		if tx.Error != nil {
+			return tx.Error
+		}
+		defer tx.Rollback() // 如果没有提交，自动回滚
 
-	if err := tx.Save(&taskLog).Error; err != nil {
-		log.Printf("Failed to update task log: %v", err)
-		return
-	}
+		if err := tx.Save(&taskLog).Error; err != nil {
+			return err
+		}
 
-	// 提交更新后的日志记录
-	if err := tx.Commit().Error; err != nil {
-		log.Printf("Failed to commit updated task log: %v", err)
+		// 提交更新后的日志记录
+		return tx.Commit().Error
+	})
+
+	if err != nil {
+		log.Printf("Failed to update task log after retries: %v", err)
 		return
 	}
 

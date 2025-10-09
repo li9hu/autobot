@@ -4,6 +4,8 @@ import (
 	"autobot/internal/database"
 	"autobot/internal/models"
 	"log"
+
+	"gorm.io/gorm"
 )
 
 const (
@@ -34,11 +36,12 @@ func (lm *LogManager) CleanupLogsAfterExecution(taskID uint) {
 
 // cleanupTaskLogs 清理单个任务的旧日志
 func (lm *LogManager) cleanupTaskLogs(taskID uint) {
-	db := database.GetDB()
-
 	// 计算当前任务的日志数量
 	var count int64
-	if err := db.Model(&models.TaskLog{}).Where("task_id = ?", taskID).Count(&count).Error; err != nil {
+	err := database.WithRetry(func(db *gorm.DB) error {
+		return db.Model(&models.TaskLog{}).Where("task_id = ?", taskID).Count(&count).Error
+	})
+	if err != nil {
 		log.Printf("Failed to count logs for task %d: %v", taskID, err)
 		return
 	}
@@ -49,34 +52,40 @@ func (lm *LogManager) cleanupTaskLogs(taskID uint) {
 
 		// 获取需要删除的最旧日志的ID
 		var logIDs []uint
-		if err := db.Model(&models.TaskLog{}).
-			Where("task_id = ?", taskID).
-			Order("created_at ASC").
-			Limit(int(excessCount)).
-			Pluck("id", &logIDs).Error; err != nil {
+		err := database.WithRetry(func(db *gorm.DB) error {
+			return db.Model(&models.TaskLog{}).
+				Where("task_id = ?", taskID).
+				Order("created_at ASC").
+				Limit(int(excessCount)).
+				Pluck("id", &logIDs).Error
+		})
+		if err != nil {
 			log.Printf("Failed to get old log IDs for task %d: %v", taskID, err)
 			return
 		}
 
 		// 删除这些日志
 		if len(logIDs) > 0 {
-			result := db.Where("id IN ?", logIDs).Delete(&models.TaskLog{})
-			if result.Error != nil {
-				log.Printf("Failed to delete old logs for task %d: %v", taskID, result.Error)
+			err := database.WithRetry(func(db *gorm.DB) error {
+				return db.Where("id IN ?", logIDs).Delete(&models.TaskLog{}).Error
+			})
+			if err != nil {
+				log.Printf("Failed to delete old logs for task %d: %v", taskID, err)
 				return
 			}
-			log.Printf("Cleaned up %d old logs for task %d (kept %d)", result.RowsAffected, taskID, MaxLogsPerTask)
+			log.Printf("Cleaned up %d old logs for task %d (kept %d)", len(logIDs), taskID, MaxLogsPerTask)
 		}
 	}
 }
 
 // cleanupGlobalLogs 清理全局旧日志
 func (lm *LogManager) cleanupGlobalLogs() {
-	db := database.GetDB()
-
 	// 计算全局日志数量
 	var count int64
-	if err := db.Model(&models.TaskLog{}).Count(&count).Error; err != nil {
+	err := database.WithRetry(func(db *gorm.DB) error {
+		return db.Model(&models.TaskLog{}).Count(&count).Error
+	})
+	if err != nil {
 		log.Printf("Failed to count global logs: %v", err)
 		return
 	}
@@ -87,22 +96,27 @@ func (lm *LogManager) cleanupGlobalLogs() {
 
 		// 获取需要删除的最旧日志的ID
 		var logIDs []uint
-		if err := db.Model(&models.TaskLog{}).
-			Order("created_at ASC").
-			Limit(int(excessCount)).
-			Pluck("id", &logIDs).Error; err != nil {
+		err := database.WithRetry(func(db *gorm.DB) error {
+			return db.Model(&models.TaskLog{}).
+				Order("created_at ASC").
+				Limit(int(excessCount)).
+				Pluck("id", &logIDs).Error
+		})
+		if err != nil {
 			log.Printf("Failed to get old log IDs for global cleanup: %v", err)
 			return
 		}
 
 		// 删除这些日志
 		if len(logIDs) > 0 {
-			result := db.Where("id IN ?", logIDs).Delete(&models.TaskLog{})
-			if result.Error != nil {
-				log.Printf("Failed to delete old logs globally: %v", result.Error)
+			err := database.WithRetry(func(db *gorm.DB) error {
+				return db.Where("id IN ?", logIDs).Delete(&models.TaskLog{}).Error
+			})
+			if err != nil {
+				log.Printf("Failed to delete old logs globally: %v", err)
 				return
 			}
-			log.Printf("Cleaned up %d old logs globally (kept %d)", result.RowsAffected, MaxTotalLogs)
+			log.Printf("Cleaned up %d old logs globally (kept %d)", len(logIDs), MaxTotalLogs)
 		}
 	}
 }

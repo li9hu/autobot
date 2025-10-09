@@ -121,14 +121,8 @@ func (s *Scheduler) AddTask(task *models.Task) error {
 			if excluded {
 				log.Printf("Skipping task execution due to time exclusion: %s (ID: %d) - %s", latestTask.Name, task.ID, reason)
 
-				// 计算下次允许执行的时间
-				parser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
-				if schedule, parseErr := parser.Parse(latestTask.CronExpr); parseErr == nil {
-					nextAllowedTime := timeutils.GetNextAllowedTime(schedule, timeExclusionConfig, now)
-					database.WithRetry(func(db *gorm.DB) error {
-						return db.Model(&models.Task{}).Where("id = ?", task.ID).Update("next_run", nextAllowedTime).Error
-					})
-				}
+				// 对于时间排除的任务，不需要立即更新数据库，减少不必要的写入操作
+				// 下次执行时间将由正常的调度逻辑计算
 				return
 			}
 		}

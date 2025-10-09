@@ -34,15 +34,16 @@ func InitDB() error {
 
 	// 使用 SQLite 数据库，通过 modernc.org/sqlite 驱动
 	// 添加 SQLite 配置参数以改善并发性能
-	dsn := "autobot.db?_busy_timeout=30000&_journal_mode=WAL&_synchronous=NORMAL&_cache_size=1000&_foreign_keys=true"
+	dsn := "autobot.db?_busy_timeout=60000&_journal_mode=WAL&_synchronous=NORMAL&_cache_size=2000&_foreign_keys=true&_temp_store=memory"
 	sqlDB, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return err
 	}
 
-	// 配置连接池
-	sqlDB.SetMaxOpenConns(25)
-	sqlDB.SetMaxIdleConns(25)
+	// 配置连接池 - 进一步减少并发连接数以避免锁定
+	// SQLite 在高并发写入时容易锁定，使用更保守的设置
+	sqlDB.SetMaxOpenConns(3) // 最多3个连接
+	sqlDB.SetMaxIdleConns(1) // 保持1个空闲连接
 	sqlDB.SetConnMaxLifetime(5 * time.Minute)
 
 	DB, err = gorm.Open(sqlite.Dialector{
@@ -81,8 +82,8 @@ func GetDB() *gorm.DB {
 
 // WithRetry 执行数据库操作，如果遇到 SQLITE_BUSY 错误则重试
 func WithRetry(operation func(*gorm.DB) error) error {
-	const maxRetries = 3
-	const retryDelay = 100 * time.Millisecond
+	const maxRetries = 5
+	const baseDelay = 50 * time.Millisecond
 
 	var err error
 	for i := 0; i < maxRetries; i++ {
@@ -94,8 +95,10 @@ func WithRetry(operation func(*gorm.DB) error) error {
 		// 检查是否是 SQLITE_BUSY 错误
 		if strings.Contains(err.Error(), "database is locked") || strings.Contains(err.Error(), "SQLITE_BUSY") {
 			if i < maxRetries-1 { // 不是最后一次重试
-				log.Printf("Database busy, retrying in %v (attempt %d/%d): %v", retryDelay, i+1, maxRetries, err)
-				time.Sleep(retryDelay * time.Duration(i+1)) // 递增延迟
+				// 使用指数退避策略：50ms, 100ms, 200ms, 400ms
+				delay := baseDelay * time.Duration(1<<i)
+				log.Printf("Database busy, retrying in %v (attempt %d/%d): %v", delay, i+1, maxRetries, err)
+				time.Sleep(delay)
 				continue
 			}
 		}
