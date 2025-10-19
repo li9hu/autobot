@@ -40,20 +40,9 @@ func ExecuteTask(task *models.Task) {
 		Status:    "running",
 	}
 
-	// 保存日志记录到数据库 - 使用事务和重试机制确保数据一致性
+	// 保存日志记录到数据库 - 使用重试机制确保数据一致性
 	err := database.WithRetry(func(db *gorm.DB) error {
-		tx := db.Begin()
-		if tx.Error != nil {
-			return tx.Error
-		}
-		defer tx.Rollback() // 如果没有提交，自动回滚
-
-		if err := tx.Create(&taskLog).Error; err != nil {
-			return err
-		}
-
-		// 提交初始日志记录
-		return tx.Commit().Error
+		return db.Create(&taskLog).Error
 	})
 
 	if err != nil {
@@ -98,20 +87,9 @@ func ExecuteTask(task *models.Task) {
 		log.Printf("Task execution completed: %s (ID: %d), Duration: %dms", task.Name, task.ID, duration)
 	}
 
-	// 保存更新后的日志 - 使用事务和重试机制确保数据一致性
+	// 保存更新后的日志 - 使用重试机制确保数据一致性
 	err = database.WithRetry(func(db *gorm.DB) error {
-		tx := db.Begin()
-		if tx.Error != nil {
-			return tx.Error
-		}
-		defer tx.Rollback() // 如果没有提交，自动回滚
-
-		if err := tx.Save(&taskLog).Error; err != nil {
-			return err
-		}
-
-		// 提交更新后的日志记录
-		return tx.Commit().Error
+		return db.Save(&taskLog).Error
 	})
 
 	if err != nil {
@@ -121,8 +99,10 @@ func ExecuteTask(task *models.Task) {
 
 	// 发送 Bark 通知（如果配置了）
 	// 新逻辑：不基于任务状态，而是基于JSON解析和占位符验证
+	// 注意：同步执行以确保 taskLog 已经完全保存到数据库
+	// 异步执行可能导致通知函数查询时读取到旧数据
 	if task.BarkConfig != "" {
-		go sendBarkNotification(task)
+		sendBarkNotification(task)
 	}
 
 	// 调用日志清理回调函数（如果设置了）

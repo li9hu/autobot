@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/robfig/cron/v3"
+	"gorm.io/gorm"
 )
 
 // 全局调度器和日志管理器实例
@@ -156,8 +157,7 @@ func CreateTask(c *gin.Context) {
 // GetTasks 获取任务列表
 func GetTasks(c *gin.Context) {
 	var tasks []models.Task
-
-	query := database.GetDB()
+	var total int64
 
 	// 分页参数
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -165,16 +165,30 @@ func GetTasks(c *gin.Context) {
 	offset := (page - 1) * limit
 
 	// 状态筛选
-	if status := c.Query("status"); status != "" {
-		query = query.Where("status = ?", status)
+	status := c.Query("status")
+
+	// 获取总数 - 使用重试机制
+	err := database.WithRetry(func(db *gorm.DB) error {
+		query := db.Model(&models.Task{})
+		if status != "" {
+			query = query.Where("status = ?", status)
+		}
+		return query.Count(&total).Error
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取任务总数失败"})
+		return
 	}
 
-	// 获取总数
-	var total int64
-	query.Model(&models.Task{}).Count(&total)
-
-	// 获取任务列表
-	if err := query.Offset(offset).Limit(limit).Order("created_at desc").Find(&tasks).Error; err != nil {
+	// 获取任务列表 - 使用重试机制
+	err = database.WithRetry(func(db *gorm.DB) error {
+		query := db
+		if status != "" {
+			query = query.Where("status = ?", status)
+		}
+		return query.Offset(offset).Limit(limit).Order("created_at desc").Find(&tasks).Error
+	})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取任务列表失败"})
 		return
 	}
@@ -338,8 +352,7 @@ func GetTaskLogs(c *gin.Context) {
 	}
 
 	var logs []models.TaskLog
-
-	query := database.GetDB().Where("task_id = ?", taskID)
+	var total int64
 
 	// 分页参数
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -347,16 +360,30 @@ func GetTaskLogs(c *gin.Context) {
 	offset := (page - 1) * limit
 
 	// 状态筛选
-	if status := c.Query("status"); status != "" {
-		query = query.Where("status = ?", status)
+	status := c.Query("status")
+
+	// 获取总数 - 使用重试机制
+	err = database.WithRetry(func(db *gorm.DB) error {
+		query := db.Model(&models.TaskLog{}).Where("task_id = ?", taskID)
+		if status != "" {
+			query = query.Where("status = ?", status)
+		}
+		return query.Count(&total).Error
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取日志总数失败"})
+		return
 	}
 
-	// 获取总数
-	var total int64
-	query.Model(&models.TaskLog{}).Count(&total)
-
-	// 获取日志列表
-	if err := query.Preload("Task").Offset(offset).Limit(limit).Order("created_at desc").Find(&logs).Error; err != nil {
+	// 获取日志列表 - 使用重试机制
+	err = database.WithRetry(func(db *gorm.DB) error {
+		query := db.Where("task_id = ?", taskID)
+		if status != "" {
+			query = query.Where("status = ?", status)
+		}
+		return query.Preload("Task").Offset(offset).Limit(limit).Order("created_at desc").Find(&logs).Error
+	})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取日志失败"})
 		return
 	}

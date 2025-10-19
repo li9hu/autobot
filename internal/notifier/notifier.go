@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"autobot/internal/barkhistory"
+	"autobot/internal/database"
 	"autobot/internal/models"
 
 	"gorm.io/gorm"
@@ -106,17 +107,25 @@ func (n *Notifier) SendBark(config map[string]string) error {
 
 // getBarkServerURL 根据设备密钥获取对应的Bark服务器URL
 func (n *Notifier) getBarkServerURL(deviceKey string) (string, error) {
-	// 查找设备对应的服务器
+	// 查找设备对应的服务器 - 使用重试机制
 	var device models.BarkDevice
-	if err := n.db.Preload("Server").Where("device_key = ? AND status = 'active'", deviceKey).First(&device).Error; err == nil {
+	err := database.WithRetry(func(db *gorm.DB) error {
+		return db.Preload("Server").Where("device_key = ? AND status = 'active'", deviceKey).First(&device).Error
+	})
+
+	if err == nil {
 		if device.Server.URL != "" && device.Server.Status == "active" {
 			return device.Server.URL, nil
 		}
 	}
 
-	// 如果没找到设备配置，尝试获取默认服务器
+	// 如果没找到设备配置，尝试获取默认服务器 - 使用重试机制
 	var defaultServer models.BarkServer
-	if err := n.db.Where("is_default = true AND status = 'active'").First(&defaultServer).Error; err == nil {
+	err = database.WithRetry(func(db *gorm.DB) error {
+		return db.Where("is_default = true AND status = 'active'").First(&defaultServer).Error
+	})
+
+	if err == nil {
 		return defaultServer.URL, nil
 	}
 
@@ -126,9 +135,13 @@ func (n *Notifier) getBarkServerURL(deviceKey string) (string, error) {
 
 // getDefaultBarkServerURL 获取默认的Bark服务器URL
 func (n *Notifier) getDefaultBarkServerURL() (string, error) {
-	// 尝试获取默认服务器
+	// 尝试获取默认服务器 - 使用重试机制
 	var defaultServer models.BarkServer
-	if err := n.db.Where("is_default = true AND status = 'active'").First(&defaultServer).Error; err == nil {
+	err := database.WithRetry(func(db *gorm.DB) error {
+		return db.Where("is_default = true AND status = 'active'").First(&defaultServer).Error
+	})
+
+	if err == nil {
 		return defaultServer.URL, nil
 	}
 
@@ -139,9 +152,12 @@ func (n *Notifier) getDefaultBarkServerURL() (string, error) {
 // ProcessBarkNotification processes and sends Bark notification for a task
 // task: the task that was executed
 func (n *Notifier) ProcessBarkNotification(task *models.Task) error {
-	// 从数据库重新获取最新的任务配置，确保配置是最新的
+	// 从数据库重新获取最新的任务配置，确保配置是最新的 - 使用重试机制
 	var latestTask models.Task
-	if err := n.db.First(&latestTask, task.ID).Error; err != nil {
+	err := database.WithRetry(func(db *gorm.DB) error {
+		return db.First(&latestTask, task.ID).Error
+	})
+	if err != nil {
 		return fmt.Errorf("failed to get latest task config: %v", err)
 	}
 
@@ -340,10 +356,12 @@ func (n *Notifier) interfaceToString(value interface{}) string {
 func (n *Notifier) getLatestTaskResult(taskID uint) (map[string]interface{}, error) {
 	var taskLog models.TaskLog
 
-	// 查询最新的执行记录（不限制状态）
-	err := n.db.Where("task_id = ?", taskID).
-		Order("created_at desc").
-		First(&taskLog).Error
+	// 查询最新的执行记录（不限制状态）- 使用重试机制
+	err := database.WithRetry(func(db *gorm.DB) error {
+		return db.Where("task_id = ?", taskID).
+			Order("created_at desc").
+			First(&taskLog).Error
+	})
 
 	if err != nil {
 		return nil, fmt.Errorf("no task result found: %v", err)
@@ -486,9 +504,12 @@ func (n *Notifier) validatePlaceholders(barkConfig *models.BarkConfig, result ma
 
 // sendBarkToSelectedDevices 向选中的设备发送 Bark 通知
 func (n *Notifier) sendBarkToSelectedDevices(barkConfig *models.BarkConfig, result map[string]interface{}, taskID uint) error {
-	// 获取选中的设备信息
+	// 获取选中的设备信息 - 使用重试机制
 	var devices []models.BarkDevice
-	if err := n.db.Where("id IN ? AND status = ?", barkConfig.SelectedDeviceIds, "active").Find(&devices).Error; err != nil {
+	err := database.WithRetry(func(db *gorm.DB) error {
+		return db.Where("id IN ? AND status = ?", barkConfig.SelectedDeviceIds, "active").Find(&devices).Error
+	})
+	if err != nil {
 		return fmt.Errorf("failed to get selected devices: %v", err)
 	}
 

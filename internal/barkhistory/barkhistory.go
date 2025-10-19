@@ -24,16 +24,18 @@ func NewBarkHistoryManager() *BarkHistoryManager {
 
 // SaveBarkRecord 保存Bark发送记录
 func (bhm *BarkHistoryManager) SaveBarkRecord(record *models.BarkRecord) error {
-	db := database.GetDB()
+	// 保存记录 - 使用重试机制
+	err := database.WithRetry(func(db *gorm.DB) error {
+		return db.Create(record).Error
+	})
 
-	// 保存记录
-	if err := db.Create(record).Error; err != nil {
+	if err != nil {
 		log.Printf("Failed to save bark record: %v", err)
 		return err
 	}
 
-	// 清理旧记录
-	bhm.cleanupOldRecords()
+	// 清理旧记录（异步执行，避免阻塞）
+	go bhm.cleanupOldRecords()
 
 	return nil
 }
@@ -65,11 +67,14 @@ func (bhm *BarkHistoryManager) checkRecentN(db *gorm.DB, record *models.BarkReco
 
 	// 只查询该任务最近N条成功发送的记录中是否有相同的content_hash
 	// 注意：只统计 status = 'success' 的记录，跳过的记录不计入
-	err := db.Model(&models.BarkRecord{}).
-		Where("task_id = ? AND content_hash = ? AND status = ?", record.TaskID, record.ContentHash, "success").
-		Order("created_at DESC").
-		Limit(recentN).
-		Count(&count).Error
+	// 使用重试机制
+	err := database.WithRetry(func(db *gorm.DB) error {
+		return db.Model(&models.BarkRecord{}).
+			Where("task_id = ? AND content_hash = ? AND status = ?", record.TaskID, record.ContentHash, "success").
+			Order("created_at DESC").
+			Limit(recentN).
+			Count(&count).Error
+	})
 
 	if err != nil {
 		log.Printf("Failed to check recent N duplication: %v", err)
@@ -85,9 +90,12 @@ func (bhm *BarkHistoryManager) checkHash(db *gorm.DB, record *models.BarkRecord)
 
 	// 只查询全局成功发送的记录中是否有相同的content_hash
 	// 注意：只统计 status = 'success' 的记录，跳过的记录不计入
-	err := db.Model(&models.BarkRecord{}).
-		Where("content_hash = ? AND status = ?", record.ContentHash, "success").
-		Count(&count).Error
+	// 使用重试机制
+	err := database.WithRetry(func(db *gorm.DB) error {
+		return db.Model(&models.BarkRecord{}).
+			Where("content_hash = ? AND status = ?", record.ContentHash, "success").
+			Count(&count).Error
+	})
 
 	if err != nil {
 		log.Printf("Failed to check hash duplication: %v", err)
@@ -107,10 +115,13 @@ func (bhm *BarkHistoryManager) checkTimeWindow(db *gorm.DB, record *models.BarkR
 
 	// 只查询时间窗口内成功发送的记录中是否有相同的content_hash
 	// 注意：只统计 status = 'success' 的记录，跳过的记录不计入
-	err := db.Model(&models.BarkRecord{}).
-		Where("task_id = ? AND content_hash = ? AND status = ? AND created_at >= ?",
-			record.TaskID, record.ContentHash, "success", startTime).
-		Count(&count).Error
+	// 使用重试机制
+	err := database.WithRetry(func(db *gorm.DB) error {
+		return db.Model(&models.BarkRecord{}).
+			Where("task_id = ? AND content_hash = ? AND status = ? AND created_at >= ?",
+				record.TaskID, record.ContentHash, "success", startTime).
+			Count(&count).Error
+	})
 
 	if err != nil {
 		log.Printf("Failed to check time window duplication: %v", err)
@@ -122,11 +133,12 @@ func (bhm *BarkHistoryManager) checkTimeWindow(db *gorm.DB, record *models.BarkR
 
 // cleanupOldRecords 清理旧记录，保持在最大记录数内
 func (bhm *BarkHistoryManager) cleanupOldRecords() {
-	db := database.GetDB()
-
-	// 计算当前记录数
+	// 计算当前记录数 - 使用重试机制
 	var count int64
-	if err := db.Model(&models.BarkRecord{}).Count(&count).Error; err != nil {
+	err := database.WithRetry(func(db *gorm.DB) error {
+		return db.Model(&models.BarkRecord{}).Count(&count).Error
+	})
+	if err != nil {
 		log.Printf("Failed to count bark records: %v", err)
 		return
 	}
@@ -135,51 +147,66 @@ func (bhm *BarkHistoryManager) cleanupOldRecords() {
 	if count > MaxBarkRecords {
 		excessCount := count - MaxBarkRecords
 
-		// 获取需要删除的最旧记录的ID
+		// 获取需要删除的最旧记录的ID - 使用重试机制
 		var recordIDs []uint
-		if err := db.Model(&models.BarkRecord{}).
-			Order("created_at ASC").
-			Limit(int(excessCount)).
-			Pluck("id", &recordIDs).Error; err != nil {
+		err := database.WithRetry(func(db *gorm.DB) error {
+			return db.Model(&models.BarkRecord{}).
+				Order("created_at ASC").
+				Limit(int(excessCount)).
+				Pluck("id", &recordIDs).Error
+		})
+		if err != nil {
 			log.Printf("Failed to get old bark record IDs: %v", err)
 			return
 		}
 
-		// 删除这些记录
+		// 删除这些记录 - 使用重试机制
 		if len(recordIDs) > 0 {
-			result := db.Where("id IN ?", recordIDs).Delete(&models.BarkRecord{})
-			if result.Error != nil {
-				log.Printf("Failed to delete old bark records: %v", result.Error)
+			var rowsAffected int64
+			err := database.WithRetry(func(db *gorm.DB) error {
+				result := db.Where("id IN ?", recordIDs).Delete(&models.BarkRecord{})
+				rowsAffected = result.RowsAffected
+				return result.Error
+			})
+			if err != nil {
+				log.Printf("Failed to delete old bark records: %v", err)
 				return
 			}
-			log.Printf("Cleaned up %d old bark records (kept %d)", result.RowsAffected, MaxBarkRecords)
+			log.Printf("Cleaned up %d old bark records (kept %d)", rowsAffected, MaxBarkRecords)
 		}
 	}
 }
 
 // GetBarkRecords 获取Bark记录（支持分页）
 func (bhm *BarkHistoryManager) GetBarkRecords(taskID uint, page int, pageSize int) ([]models.BarkRecord, int64, error) {
-	db := database.GetDB()
-
 	var records []models.BarkRecord
 	var total int64
 
-	query := db.Model(&models.BarkRecord{})
-	if taskID > 0 {
-		query = query.Where("task_id = ?", taskID)
-	}
-
-	// 获取总数
-	if err := query.Count(&total).Error; err != nil {
+	// 获取总数 - 使用重试机制
+	err := database.WithRetry(func(db *gorm.DB) error {
+		query := db.Model(&models.BarkRecord{})
+		if taskID > 0 {
+			query = query.Where("task_id = ?", taskID)
+		}
+		return query.Count(&total).Error
+	})
+	if err != nil {
 		return nil, 0, err
 	}
 
-	// 获取分页数据
+	// 获取分页数据 - 使用重试机制
 	offset := (page - 1) * pageSize
-	if err := query.Order("created_at DESC").
-		Limit(pageSize).
-		Offset(offset).
-		Find(&records).Error; err != nil {
+	err = database.WithRetry(func(db *gorm.DB) error {
+		query := db.Model(&models.BarkRecord{})
+		if taskID > 0 {
+			query = query.Where("task_id = ?", taskID)
+		}
+		return query.Order("created_at DESC").
+			Limit(pageSize).
+			Offset(offset).
+			Find(&records).Error
+	})
+	if err != nil {
 		return nil, 0, err
 	}
 
@@ -188,20 +215,24 @@ func (bhm *BarkHistoryManager) GetBarkRecords(taskID uint, page int, pageSize in
 
 // GetBarkStats 获取Bark发送统计信息
 func (bhm *BarkHistoryManager) GetBarkStats() map[string]interface{} {
-	db := database.GetDB()
-
 	var totalRecords int64
 	var successRecords int64
 	var failedRecords int64
 
-	// 总记录数
-	db.Model(&models.BarkRecord{}).Count(&totalRecords)
+	// 总记录数 - 使用重试机制
+	database.WithRetry(func(db *gorm.DB) error {
+		return db.Model(&models.BarkRecord{}).Count(&totalRecords).Error
+	})
 
-	// 成功记录数
-	db.Model(&models.BarkRecord{}).Where("status = ?", "success").Count(&successRecords)
+	// 成功记录数 - 使用重试机制
+	database.WithRetry(func(db *gorm.DB) error {
+		return db.Model(&models.BarkRecord{}).Where("status = ?", "success").Count(&successRecords).Error
+	})
 
-	// 失败记录数
-	db.Model(&models.BarkRecord{}).Where("status = ?", "failed").Count(&failedRecords)
+	// 失败记录数 - 使用重试机制
+	database.WithRetry(func(db *gorm.DB) error {
+		return db.Model(&models.BarkRecord{}).Where("status = ?", "failed").Count(&failedRecords).Error
+	})
 
 	stats := map[string]interface{}{
 		"total_records":   totalRecords,
@@ -213,8 +244,14 @@ func (bhm *BarkHistoryManager) GetBarkStats() map[string]interface{} {
 	// 获取最新和最旧记录时间
 	if totalRecords > 0 {
 		var oldestRecord, newestRecord models.BarkRecord
-		db.Order("created_at asc").First(&oldestRecord)
-		db.Order("created_at desc").First(&newestRecord)
+
+		database.WithRetry(func(db *gorm.DB) error {
+			return db.Order("created_at asc").First(&oldestRecord).Error
+		})
+
+		database.WithRetry(func(db *gorm.DB) error {
+			return db.Order("created_at desc").First(&newestRecord).Error
+		})
 
 		stats["oldest_record"] = oldestRecord.CreatedAt
 		stats["newest_record"] = newestRecord.CreatedAt
@@ -225,19 +262,20 @@ func (bhm *BarkHistoryManager) GetBarkStats() map[string]interface{} {
 
 // DeleteAllBarkRecords 删除所有Bark记录
 func (bhm *BarkHistoryManager) DeleteAllBarkRecords() (int64, error) {
-	db := database.GetDB()
+	var rowsAffected int64
 
-	// 先计算要删除的记录数
-	var count int64
-	db.Model(&models.BarkRecord{}).Count(&count)
+	// 删除所有记录 - 使用重试机制
+	err := database.WithRetry(func(db *gorm.DB) error {
+		result := db.Where("1 = 1").Delete(&models.BarkRecord{})
+		rowsAffected = result.RowsAffected
+		return result.Error
+	})
 
-	// 删除所有记录
-	result := db.Where("1 = 1").Delete(&models.BarkRecord{})
-	if result.Error != nil {
-		log.Printf("Failed to delete all Bark records: %v", result.Error)
-		return 0, result.Error
+	if err != nil {
+		log.Printf("Failed to delete all Bark records: %v", err)
+		return 0, err
 	}
 
-	log.Printf("Deleted all Bark records: %d records", result.RowsAffected)
-	return result.RowsAffected, nil
+	log.Printf("Deleted all Bark records: %d records", rowsAffected)
+	return rowsAffected, nil
 }
