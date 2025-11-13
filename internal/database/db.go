@@ -40,11 +40,12 @@ func InitDB() error {
 		return err
 	}
 
-	// 配置连接池 - 进一步减少并发连接数以避免锁定
-	// SQLite 在高并发写入时容易锁定，使用更保守的设置
-	sqlDB.SetMaxOpenConns(3) // 最多3个连接
-	sqlDB.SetMaxIdleConns(1) // 保持1个空闲连接
-	sqlDB.SetConnMaxLifetime(5 * time.Minute)
+	// 配置连接池 - 针对并发任务执行优化
+	// SQLite with WAL mode 可以支持多个读连接和1个写连接
+	// 设置足够的连接数以支持并发任务执行
+	sqlDB.SetMaxOpenConns(20)              // 最多20个连接，足够支持10+个并发任务
+	sqlDB.SetMaxIdleConns(5)               // 保持5个空闲连接，减少连接创建开销
+	sqlDB.SetConnMaxLifetime(10 * time.Minute) // 连接生命周期10分钟
 
 	DB, err = gorm.Open(sqlite.Dialector{
 		DriverName: "sqlite",
@@ -87,23 +88,28 @@ func WithRetry(operation func(*gorm.DB) error) error {
 
 	var err error
 	for i := 0; i < maxRetries; i++ {
-		err = operation(DB)
+		// 为每次操作创建新的会话，避免事务状态污染
+		session := DB.Session(&gorm.Session{})
+		err = operation(session)
 		if err == nil {
 			return nil
 		}
 
-		// 检查是否是 SQLITE_BUSY 错误
-		if strings.Contains(err.Error(), "database is locked") || strings.Contains(err.Error(), "SQLITE_BUSY") {
+		// 检查是否是 SQLITE_BUSY 或事务错误
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "database is locked") || 
+			strings.Contains(errMsg, "SQLITE_BUSY") ||
+			strings.Contains(errMsg, "cannot start a transaction within a transaction") {
 			if i < maxRetries-1 { // 不是最后一次重试
 				// 使用指数退避策略：50ms, 100ms, 200ms, 400ms
 				delay := baseDelay * time.Duration(1<<i)
-				log.Printf("Database busy, retrying in %v (attempt %d/%d): %v", delay, i+1, maxRetries, err)
+				log.Printf("Database error, retrying in %v (attempt %d/%d): %v", delay, i+1, maxRetries, err)
 				time.Sleep(delay)
 				continue
 			}
 		}
 
-		// 非 SQLITE_BUSY 错误或已达到最大重试次数
+		// 非可重试错误或已达到最大重试次数
 		break
 	}
 

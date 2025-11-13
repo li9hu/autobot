@@ -123,11 +123,14 @@ func (lm *LogManager) cleanupGlobalLogs() {
 
 // GetLogStats 获取日志统计信息
 func (lm *LogManager) GetLogStats() map[string]interface{} {
-	db := database.GetDB()
-
-	// 获取全局日志统计
+	// 获取全局日志统计 - 使用重试机制
 	var totalLogs int64
-	db.Model(&models.TaskLog{}).Count(&totalLogs)
+	err := database.WithRetry(func(db *gorm.DB) error {
+		return db.Model(&models.TaskLog{}).Count(&totalLogs).Error
+	})
+	if err != nil {
+		log.Printf("Failed to count total logs: %v", err)
+	}
 
 	stats := map[string]interface{}{
 		"total_logs":        totalLogs,
@@ -135,14 +138,24 @@ func (lm *LogManager) GetLogStats() map[string]interface{} {
 		"max_logs_per_task": MaxLogsPerTask,
 	}
 
-	// 获取最新和最旧日志时间
+	// 获取最新和最旧日志时间 - 使用重试机制
 	if totalLogs > 0 {
 		var oldestLog, newestLog models.TaskLog
-		db.Order("created_at asc").First(&oldestLog)
-		db.Order("created_at desc").First(&newestLog)
+		
+		database.WithRetry(func(db *gorm.DB) error {
+			return db.Order("created_at asc").First(&oldestLog).Error
+		})
+		
+		database.WithRetry(func(db *gorm.DB) error {
+			return db.Order("created_at desc").First(&newestLog).Error
+		})
 
-		stats["oldest_log"] = oldestLog.CreatedAt
-		stats["newest_log"] = newestLog.CreatedAt
+		if oldestLog.ID > 0 {
+			stats["oldest_log"] = oldestLog.CreatedAt
+		}
+		if newestLog.ID > 0 {
+			stats["newest_log"] = newestLog.CreatedAt
+		}
 	}
 
 	return stats

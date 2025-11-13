@@ -138,7 +138,11 @@ func CreateTask(c *gin.Context) {
 		TimeExclusionConfig: req.TimeExclusionConfig,
 	}
 
-	if err := database.GetDB().Create(&task).Error; err != nil {
+	// 使用重试机制创建任务
+	err = database.WithRetry(func(db *gorm.DB) error {
+		return db.Create(&task).Error
+	})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建任务失败"})
 		return
 	}
@@ -271,7 +275,11 @@ func UpdateTask(c *gin.Context) {
 		task.TimeExclusionConfig = req.TimeExclusionConfig
 	}
 
-	if err := database.GetDB().Save(&task).Error; err != nil {
+	// 使用重试机制保存任务
+	err = database.WithRetry(func(db *gorm.DB) error {
+		return db.Save(&task).Error
+	})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新任务失败"})
 		return
 	}
@@ -312,8 +320,14 @@ func DeleteTask(c *gin.Context) {
 	var logCount int64
 	database.GetDB().Model(&models.TaskLog{}).Where("task_id = ?", taskID).Count(&logCount)
 
-	// 开启事务，确保删除操作的原子性
-	tx := database.GetDB().Begin()
+	// 开启事务，确保删除操作的原子性 - 使用新session避免污染全局DB状态
+	tx := database.GetDB().Session(&gorm.Session{}).Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+			panic(r) // 重新抛出panic
+		}
+	}()
 
 	// 先删除相关的日志
 	if err := tx.Where("task_id = ?", taskID).Delete(&models.TaskLog{}).Error; err != nil {
@@ -624,7 +638,11 @@ func UpdateBarkConfig(c *gin.Context) {
 	}
 
 	task.BarkConfig = req.BarkConfig
-	if err := database.GetDB().Save(&task).Error; err != nil {
+	// 使用重试机制保存Bark配置
+	err = database.WithRetry(func(db *gorm.DB) error {
+		return db.Save(&task).Error
+	})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新 Bark 配置失败"})
 		return
 	}
@@ -717,7 +735,11 @@ func CreateBarkServer(c *gin.Context) {
 		Status:      "active",
 	}
 
-	if err := database.GetDB().Create(&server).Error; err != nil {
+	// 使用重试机制创建服务器
+	err := database.WithRetry(func(db *gorm.DB) error {
+		return db.Create(&server).Error
+	})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建服务器失败"})
 		return
 	}
@@ -818,7 +840,11 @@ func UpdateBarkServer(c *gin.Context) {
 	}
 	server.IsDefault = req.IsDefault
 
-	if err := database.GetDB().Save(&server).Error; err != nil {
+	// 使用重试机制保存服务器
+	err = database.WithRetry(func(db *gorm.DB) error {
+		return db.Save(&server).Error
+	})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新服务器失败"})
 		return
 	}
@@ -851,8 +877,11 @@ func DeleteBarkServer(c *gin.Context) {
 		return
 	}
 
-	// 删除服务器
-	if err := database.GetDB().Delete(&models.BarkServer{}, serverID).Error; err != nil {
+	// 删除服务器 - 使用重试机制
+	err = database.WithRetry(func(db *gorm.DB) error {
+		return db.Delete(&models.BarkServer{}, serverID).Error
+	})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "删除服务器失败"})
 		return
 	}
@@ -894,7 +923,11 @@ func CreateBarkDevice(c *gin.Context) {
 		Status:      "active",
 	}
 
-	if err := database.GetDB().Create(&device).Error; err != nil {
+	// 使用重试机制创建设备
+	err := database.WithRetry(func(db *gorm.DB) error {
+		return db.Create(&device).Error
+	})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建设备失败"})
 		return
 	}
@@ -1015,7 +1048,11 @@ func UpdateBarkDevice(c *gin.Context) {
 	}
 	device.IsDefault = req.IsDefault
 
-	if err := database.GetDB().Save(&device).Error; err != nil {
+	// 使用重试机制保存设备
+	err = database.WithRetry(func(db *gorm.DB) error {
+		return db.Save(&device).Error
+	})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新设备失败"})
 		return
 	}
@@ -1042,8 +1079,11 @@ func DeleteBarkDevice(c *gin.Context) {
 		return
 	}
 
-	// 删除设备
-	if err := database.GetDB().Delete(&models.BarkDevice{}, deviceID).Error; err != nil {
+	// 删除设备 - 使用重试机制
+	err = database.WithRetry(func(db *gorm.DB) error {
+		return db.Delete(&models.BarkDevice{}, deviceID).Error
+	})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "删除设备失败"})
 		return
 	}

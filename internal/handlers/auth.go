@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 // LoginHandler 登录页面
@@ -51,12 +52,20 @@ func Login(c *gin.Context) {
 // Register 用户注册API
 func Register(c *gin.Context) {
 	// 检查是否已有用户存在 - 使用事务确保数据一致性
-	tx := database.GetDB().Begin()
+	// 使用新session避免污染全局DB状态
+	tx := database.GetDB().Session(&gorm.Session{}).Begin()
 	if tx.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "系统错误，请稍后重试"})
 		return
 	}
-	defer tx.Rollback() // 如果没有提交，自动回滚
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+			panic(r) // 重新抛出panic
+		} else {
+			tx.Rollback() // 如果没有提交，自动回滚
+		}
+	}()
 
 	var userCount int64
 	if err := tx.Model(&models.User{}).Count(&userCount).Error; err != nil {
