@@ -34,7 +34,14 @@ func InitDB() error {
 
 	// 使用 SQLite 数据库，通过 modernc.org/sqlite 驱动
 	// 添加 SQLite 配置参数以改善并发性能
-	dsn := "autobot.db?_busy_timeout=60000&_journal_mode=WAL&_synchronous=NORMAL&_cache_size=2000&_foreign_keys=true&_temp_store=memory"
+	// _busy_timeout=60000: 60秒超时，给长时间操作足够时间
+	// _journal_mode=WAL: WAL模式，支持多读单写
+	// _synchronous=NORMAL: 平衡性能和安全性
+	// _cache_size=2000: 缓存大小
+	// _foreign_keys=true: 启用外键约束
+	// _temp_store=memory: 临时表存储在内存中
+	// _txlock=immediate: 立即获取写锁，避免死锁
+	dsn := "autobot.db?_busy_timeout=60000&_journal_mode=WAL&_synchronous=NORMAL&_cache_size=2000&_foreign_keys=true&_temp_store=memory&_txlock=immediate"
 	sqlDB, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return err
@@ -82,14 +89,19 @@ func GetDB() *gorm.DB {
 }
 
 // WithRetry 执行数据库操作，如果遇到 SQLITE_BUSY 错误则重试
+// 针对SQLite的写锁竞争问题，使用更激进的重试策略
 func WithRetry(operation func(*gorm.DB) error) error {
-	const maxRetries = 5
-	const baseDelay = 50 * time.Millisecond
+	const maxRetries = 15  // 增加到15次重试，应对高并发写操作
+	const initialDelay = 10 * time.Millisecond
+	const maxDelay = 2 * time.Second
 
 	var err error
 	for i := 0; i < maxRetries; i++ {
 		// 为每次操作创建新的会话，避免事务状态污染
-		session := DB.Session(&gorm.Session{})
+		// 使用PrepareStmt=false来减少锁持有时间，确保操作立即提交
+		session := DB.Session(&gorm.Session{
+			PrepareStmt: false, // 禁用预编译语句，减少锁持有时间
+		})
 		err = operation(session)
 		if err == nil {
 			return nil
@@ -101,8 +113,12 @@ func WithRetry(operation func(*gorm.DB) error) error {
 			strings.Contains(errMsg, "SQLITE_BUSY") ||
 			strings.Contains(errMsg, "cannot start a transaction within a transaction") {
 			if i < maxRetries-1 { // 不是最后一次重试
-				// 使用指数退避策略：50ms, 100ms, 200ms, 400ms
-				delay := baseDelay * time.Duration(1<<i)
+				// 使用指数退避策略，但限制最大延迟
+				// 延迟序列：10ms, 20ms, 40ms, 80ms, 160ms, 320ms, 640ms, 1.28s, 2s, 2s...
+				delay := initialDelay * time.Duration(1<<uint(i))
+				if delay > maxDelay {
+					delay = maxDelay
+				}
 				log.Printf("Database error, retrying in %v (attempt %d/%d): %v", delay, i+1, maxRetries, err)
 				time.Sleep(delay)
 				continue

@@ -143,8 +143,9 @@ func (s *Scheduler) AddTask(task *models.Task) error {
 			log.Printf("Failed to parse cron expression '%s' during execution for task %d: %v", latestTask.CronExpr, task.ID, err)
 		}
 
-		// 更新执行时间
-		database.WithRetry(func(db *gorm.DB) error {
+		// 更新执行时间 - 使用重试机制，忽略错误（非关键操作）
+		// 注意：这个操作可能失败，但不应该阻止任务执行
+		_ = database.WithRetry(func(db *gorm.DB) error {
 			return db.Model(&models.Task{}).Where("id = ?", task.ID).Updates(map[string]interface{}{
 				"last_run": now,
 				"next_run": nextRun,

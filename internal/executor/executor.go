@@ -99,15 +99,16 @@ func ExecuteTask(task *models.Task) {
 
 	// 发送 Bark 通知（如果配置了）
 	// 新逻辑：不基于任务状态，而是基于JSON解析和占位符验证
-	// 注意：同步执行以确保 taskLog 已经完全保存到数据库
-	// 异步执行可能导致通知函数查询时读取到旧数据
+	// 改为异步执行，避免阻塞任务执行和持有数据库锁
+	// 注意：taskLog 已经完全保存到数据库，异步执行是安全的
 	if task.BarkConfig != "" {
-		sendBarkNotification(task)
+		go sendBarkNotification(task)
 	}
 
 	// 调用日志清理回调函数（如果设置了）
+	// 改为异步执行，避免阻塞任务执行和持有数据库锁
 	if logCleanupCallback != nil {
-		logCleanupCallback(task.ID)
+		go logCleanupCallback(task.ID)
 	}
 }
 
